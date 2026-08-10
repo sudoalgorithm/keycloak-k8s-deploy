@@ -1,0 +1,94 @@
+# ============================================================================
+# Keycloak — PRODUCTION environment (on-prem production cluster)
+# ============================================================================
+# No PostgreSQL here: production uses the client's external HA PostgreSQL
+# cluster via its stable read-write endpoint. Deliberately parallel to
+# staging.yaml — diff the two files to see exactly what differs
+# (DB source, hostname, resources; nothing else).
+#
+# Prerequisites (exact commands in operators/install-notes.md):
+#   1. Keycloak operator installed in the `keycloak` namespace
+#   2. Secret `keycloak-db` created (keys: username, password) with the
+#      credentials of the `keycloak` database owner on the client's PG
+#   3. Secret `keycloak-bootstrap-admin` created (keys: username, password)
+#
+# REPLACE BEFORE APPLYING:
+#   <CLIENT-DOMAIN>          — the client's production auth domain suffix
+#   <CLIENT-PG-RW-ENDPOINT>  — the client PG cluster's read-write endpoint
+#                              (VIP / Patroni proxy / PgBouncer front — open
+#                              item #1 in the design spec)
+#
+# Apply:    kubectl apply -f production.yaml
+# Verify:   kubectl -n keycloak wait --for=condition=Ready keycloak/keycloak --timeout=15m
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+---
+# ----------------------------------------------------------------------------
+# Keycloak — 3 instances, operator-managed, client-approved sizing
+# (1500m/2Gi requests, 3000m/3Gi limits per pod; peak fits on N-1 pods).
+# Since Keycloak 26.0 the operator applies default anti-affinity so pods of
+# this CR avoid sharing a node — the cluster needs >= 3 schedulable nodes.
+# ----------------------------------------------------------------------------
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  instances: 3
+  # Custom image with the email-or-phone authenticator JAR, once it exists:
+  # image: <registry>/keycloak-custom:26.x.y
+  db:
+    vendor: postgres
+    host: <CLIENT-PG-RW-ENDPOINT>
+    database: keycloak
+    usernameSecret:
+      name: keycloak-db # created manually, see install-notes.md
+      key: username
+    passwordSecret:
+      name: keycloak-db
+      key: password
+    # Fixed-size pool, 20 per pod x 3 pods = 60, inside the 70-connection
+    # budget (60 app + 10 ops) agreed with the client.
+    poolMinSize: 20
+    poolInitialSize: 20
+    poolMaxSize: 20
+  http:
+    httpEnabled: true # TLS terminates at the nginx LB in front of Kong
+  hostname:
+    hostname: https://auth.<CLIENT-DOMAIN>
+  proxy:
+    headers: xforwarded
+  bootstrapAdmin:
+    user:
+      secret: keycloak-bootstrap-admin # created manually, see install-notes.md
+  additionalOptions:
+    - name: metrics-enabled
+      value: "true"
+  resources:
+    requests:
+      cpu: 1500m
+      memory: 2Gi
+    limits:
+      cpu: "3"
+      memory: 3Gi
+---
+# ----------------------------------------------------------------------------
+# Survive voluntary disruptions (node drains, upgrades): always keep 2 of 3.
+# Label selector matches the pods the operator creates for the CR above.
+# ----------------------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: keycloak
+      app.kubernetes.io/managed-by: keycloak-operator
+      app.kubernetes.io/component: server
