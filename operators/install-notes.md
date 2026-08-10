@@ -4,7 +4,7 @@ Everything here is `kubectl` against pinned, official upstream manifests — no
 Helm, no Kustomize. Run the steps yourself in order; each step says which
 cluster it applies to.
 
-> **Version pins.** Keycloak operator `26.3.2`, CNPG `1.25.1`. Before a fresh
+> **Version pins.** Keycloak operator `26.5.2`, CNPG `1.25.1`. Before a fresh
 > install, check for newer patch releases of the same minor
 > (https://github.com/keycloak/keycloak/releases,
 > https://github.com/cloudnative-pg/cloudnative-pg/releases) and bump the pin
@@ -15,7 +15,7 @@ cluster it applies to.
 The operator manifests are namespaced; the namespace must exist first.
 
 ```bash
-KC_VER=26.3.2
+KC_VER=26.5.2
 
 kubectl create namespace keycloak
 
@@ -58,7 +58,22 @@ kubectl -n keycloak create secret generic keycloak-db \
   --from-literal=password='<CLIENT-PROVIDED>'
 ```
 
-Staging needs no DB secret — CNPG generates `keycloak-pg-app` automatically.
+Production cluster only — the CA certificate of the external PostgreSQL (PEM
+file from the DBA team; Keycloak verifies the DB connection against it via
+`db-tls-mode: verify-server`):
+
+```bash
+kubectl -n keycloak create secret generic keycloak-db-ca \
+  --from-file=ca.crt=<PATH-TO-CLIENT-PG-CA>.pem
+```
+
+If the client's PostgreSQL turns out not to serve TLS, deploying without it
+means removing `db-tls-mode` and the `truststores` block from
+`production.yaml` — record that as an accepted risk with the client, don't do
+it silently.
+
+Staging needs neither — CNPG generates `keycloak-pg-app` (credentials) and
+`keycloak-pg-ca` (CA) automatically.
 
 ## 4. Deploy staging
 
@@ -82,6 +97,10 @@ kubectl -n keycloak get pods -o wide
 
 # PDB active, ALLOWED DISRUPTIONS = 1:
 kubectl -n keycloak get pdb keycloak
+
+# DB connection is TLS-verified (look for no TLS/SSL errors at startup and
+# structured JSON log lines confirming the pool is up):
+kubectl -n keycloak logs statefulset/keycloak --tail=50 | grep -i -E 'ssl|tls|pool' || true
 
 # token endpoint answers (through a port-forward; realm exists after the
 # migration rehearsal imports it — until then use the master realm's

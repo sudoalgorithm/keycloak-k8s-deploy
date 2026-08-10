@@ -88,9 +88,22 @@ spec:
   bootstrapAdmin:
     user:
       secret: keycloak-bootstrap-admin # created manually, see install-notes.md
+  # TLS to PostgreSQL, verified against the CNPG-generated CA — rehearses the
+  # production db-tls setup. CNPG creates the `keycloak-pg-ca` secret (ca.crt)
+  # automatically alongside the cluster.
+  truststores:
+    db-ca:
+      secret:
+        name: keycloak-pg-ca
   additionalOptions:
+    - name: db-tls-mode
+      value: verify-server
     - name: metrics-enabled
       value: "true"
+    - name: event-metrics-user-enabled # login/logout event metrics for alerting
+      value: "true"
+    - name: log-console-output # structured logs for the log stack
+      value: json
   resources:
     requests:
       cpu: 500m

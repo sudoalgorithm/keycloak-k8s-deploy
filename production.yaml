@@ -65,9 +65,24 @@ spec:
   bootstrapAdmin:
     user:
       secret: keycloak-bootstrap-admin # created manually, see install-notes.md
+  # TLS to the external PostgreSQL, verified against its CA. The secret
+  # `keycloak-db-ca` (key ca.crt, PEM) is created by hand from the CA the DBA
+  # team provides — see install-notes.md. If their PostgreSQL does not serve
+  # TLS, removing db-tls-mode + this truststore is a documented risk decision,
+  # not a default.
+  truststores:
+    db-ca:
+      secret:
+        name: keycloak-db-ca
   additionalOptions:
+    - name: db-tls-mode
+      value: verify-server
     - name: metrics-enabled
       value: "true"
+    - name: event-metrics-user-enabled # login/logout event metrics for alerting
+      value: "true"
+    - name: log-console-output # structured logs for the log stack
+      value: json
   resources:
     requests:
       cpu: 1500m
