@@ -12,6 +12,8 @@
 #
 # REPLACE BEFORE APPLYING:
 #   <CLIENT-DOMAIN>  — the client's staging auth domain suffix
+#   <REGISTRY>       — the internal container registry (air-gapped cluster:
+#                      all images are mirrored there first, see install-notes)
 #
 # Apply:    kubectl apply -f staging.yaml
 # Verify:   kubectl -n keycloak wait --for=condition=Ready keycloak/keycloak --timeout=15m
@@ -36,7 +38,9 @@ metadata:
   namespace: keycloak
 spec:
   instances: 2
-  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  imageName: <REGISTRY>/cloudnative-pg/postgresql:16 # mirrored from ghcr.io
+  # imagePullSecrets:               # uncomment if the registry requires auth
+  #   - name: registry-credentials
   # Staging-only convenience: superuser access is needed when the migration
   # rehearsal restores the vendor dump into a scratch database. Never in prod
   # (prod PG is the client's anyway).
@@ -62,8 +66,16 @@ metadata:
   namespace: keycloak
 spec:
   instances: 3
-  # Custom image with the email-or-phone authenticator JAR, once it exists:
-  # image: <registry>/keycloak-custom:26.x.y
+  # Air-gapped cluster: the image is the stock upstream image mirrored into
+  # the internal registry (must match the operator version exactly). Because
+  # it is the UN-augmented stock image, startOptimized stays false — Keycloak
+  # re-augments with our build-time options at startup. When the custom
+  # email-or-phone authenticator image lands (built and pushed locally), it
+  # replaces this reference and startOptimized can flip to true.
+  image: <REGISTRY>/keycloak/keycloak:26.5.2
+  startOptimized: false
+  # imagePullSecrets:               # uncomment if the registry requires auth
+  #   - name: registry-credentials
   db:
     vendor: postgres
     host: keycloak-pg-rw.keycloak.svc

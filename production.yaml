@@ -14,6 +14,8 @@
 #
 # REPLACE BEFORE APPLYING:
 #   <CLIENT-DOMAIN>          — the client's production auth domain suffix
+#   <REGISTRY>               — the internal container registry (air-gapped
+#                              cluster: images are mirrored there first)
 #   <CLIENT-PG-RW-ENDPOINT>  — the client PG cluster's read-write endpoint
 #                              (VIP / Patroni proxy / PgBouncer front — open
 #                              item #1 in the design spec)
@@ -39,8 +41,16 @@ metadata:
   namespace: keycloak
 spec:
   instances: 3
-  # Custom image with the email-or-phone authenticator JAR, once it exists:
-  # image: <registry>/keycloak-custom:26.x.y
+  # Air-gapped cluster: the image is the stock upstream image mirrored into
+  # the internal registry (must match the operator version exactly). Because
+  # it is the UN-augmented stock image, startOptimized stays false — Keycloak
+  # re-augments with our build-time options at startup. When the custom
+  # email-or-phone authenticator image lands (built and pushed locally), it
+  # replaces this reference and startOptimized can flip to true.
+  image: <REGISTRY>/keycloak/keycloak:26.5.2
+  startOptimized: false
+  # imagePullSecrets:               # uncomment if the registry requires auth
+  #   - name: registry-credentials
   db:
     vendor: postgres
     host: <CLIENT-PG-RW-ENDPOINT>
