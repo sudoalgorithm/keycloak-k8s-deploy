@@ -15,9 +15,22 @@ or mirrored into the internal container registry beforehand.
 │   ├── install-notes.md       # step-by-step: image mirroring, operator installs, secrets, deploy, validation
 │   ├── keycloak-operator/     # vendored official manifests, tag 26.5.2 (unmodified)
 │   └── cnpg/                  # vendored official CNPG manifest 1.25.1 (unmodified)
+├── build/
+│   └── keycloak/              # Dockerfile for the custom image (authenticator JAR),
+│                              # builds INSIDE the air gap from the mirrored base
 └── docs/
     └── manifests-explained.md # field-by-field walkthrough of the two YAML files
 ```
+
+**Why no Dockerfiles for the platform images:** we never build Keycloak,
+the operators, or PostgreSQL — a `docker build` would itself pull base images
+from the internet, and hand-built images lose the official release's testing
+and signing. Air-gapped delivery means the four **official** images are pulled
+on a connected machine, saved to tar, carried across the gap through the
+approved channel, and pushed to the internal registry (install-notes step 0).
+The only image we build is our own custom Keycloak (`build/keycloak/`), and
+its Dockerfile deliberately uses the mirrored base so it builds entirely
+inside the gap.
 
 ## What gets deployed
 

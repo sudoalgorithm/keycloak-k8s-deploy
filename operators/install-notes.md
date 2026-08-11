@@ -64,6 +64,15 @@ The path layout in the registry mirrors upstream minus the host
 (`<REGISTRY>/keycloak/keycloak:26.5.2` etc.) — the YAML files and the `sed`
 substitutions below assume exactly this layout.
 
+> **Why images are mirrored, not built.** There are deliberately no
+> Dockerfiles for these four images: a `docker build` would itself pull a base
+> image from the internet, and hand-built images lose the official release's
+> testing and signing. The air gap is crossed by *transferring* the official
+> artifacts through the approved channel — the same trust model as the vendor
+> dump. The one image we do build is the custom Keycloak
+> (`build/keycloak/Dockerfile`), and it builds **inside** the gap from the
+> mirrored base image; its JAR is compiled offline and copied in.
+
 If the registry requires authentication, additionally create a pull secret on
 each cluster (and uncomment the `imagePullSecrets` blocks in the YAML files):
 
