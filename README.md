@@ -84,8 +84,10 @@ diff staging.yaml production.yaml
 Full command sequence, validation checklist included:
 **[`operators/install-notes.md`](operators/install-notes.md)**. In short:
 
-1. Mirror the four images into the internal registry (connected machine →
-   air gap → registry push).
+1. Get the four images: download the prebuilt bundle from the repo's
+   **Releases** page (tag `images-26.5.2`, ~700 MB, `SHA256SUMS` included) —
+   or regenerate it with the pull/save commands in the install notes. Then:
+   connected machine → air gap → internal registry push.
 2. Install the Keycloak operator (both clusters) and the CloudNativePG
    operator (staging cluster only) from the vendored manifests, images
    rewritten to the internal registry.

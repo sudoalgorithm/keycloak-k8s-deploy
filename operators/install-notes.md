@@ -15,6 +15,22 @@ cluster, production cluster).
 
 ## 0. Prepare the air-gap bundle — CONNECTED machine
 
+**Shortcut: a prebuilt bundle is attached to the repo's Releases page**
+(tag `images-26.5.2`) — four gzipped image archives + `SHA256SUMS`, all
+`linux/amd64`:
+
+```bash
+gh release download images-26.5.2 --dir bundle
+# or download the assets from
+# https://github.com/sudoalgorithm/keycloak-k8s-deploy/releases/tag/images-26.5.2
+shasum -a 256 -c bundle/SHA256SUMS   # verify before AND after crossing the gap
+```
+
+With the bundle downloaded, skip straight to the transfer/load/push part
+below. The pull/save commands that follow are how the bundle is
+**regenerated** — needed on a version bump, or if you prefer not to trust a
+prebuilt artifact.
+
 Four images make the whole system run:
 
 | Image | Used by |
