@@ -92,13 +92,46 @@ each cluster (and uncomment the `imagePullSecrets` blocks in the YAML files):
 
 ```bash
 kubectl -n keycloak create secret docker-registry registry-credentials \
-  --docker-server="$REGISTRY" --docker-username=<USER> --docker-password=<PASS>
+  --docker-server=<REGISTRY-HOST> --docker-username=<USER> --docker-password=<PASS>
 # same again in cnpg-system on the staging cluster after step 2 creates it,
 # then: kubectl -n cnpg-system patch serviceaccount cnpg-manager \
 #         -p '{"imagePullSecrets":[{"name":"registry-credentials"}]}'
 #       kubectl -n keycloak patch serviceaccount keycloak-operator \
 #         -p '{"imagePullSecrets":[{"name":"registry-credentials"}]}'
 ```
+
+### The client registry is GitLab — specifics
+
+The internal registry is the **GitLab container registry**, which changes two
+assumptions:
+
+1. **Paths are project-scoped.** Every image must live under a GitLab
+   group/project path. Set the placeholder to the full prefix and nothing
+   else changes:
+
+   ```
+   REGISTRY=registry.<gitlab-host>/<group>/<project>   # e.g. .../infra/keycloak-images
+   ```
+
+   Final refs look like
+   `registry.<gitlab-host>/infra/keycloak-images/keycloak/keycloak:26.5.2`
+   (GitLab allows extra path levels below the project). Ask the GitLab admin
+   to create/designate the project.
+
+2. **Auth is mandatory** (no anonymous pulls) — so the `imagePullSecrets`
+   blocks in both YAML files must be uncommented, and the pull-secret +
+   service-account patches above are required, not optional. Tokens needed
+   from the admin:
+   - `write_registry` token — for `docker login` on the machine that pushes
+     the bundle;
+   - **deploy token** with `read_registry` — for the clusters' pull secret.
+
+   `--docker-server` takes the registry **host only** (no group/project
+   path).
+
+3. **Disable the cleanup policy** on that project's container registry —
+   GitLab cleanup policies auto-delete tags on a schedule and would silently
+   remove pinned images.
 
 ## 1. Keycloak operator — BOTH clusters
 
