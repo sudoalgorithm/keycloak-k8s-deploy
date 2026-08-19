@@ -178,13 +178,18 @@ PVC to it — this is what staging runs:
   only. For a replica (`instances: 2`) use a shared `storageClassName` on two
   PVs (different nodes for `local` volumes) instead of `volumeName`.
 
-> **⚠️ The PV must be block or local storage — not S3/FUSE.** Staging was
-> first deployed on a `ru.yandex.s3.csi` (geesefs) PV backed by an S3 bucket.
-> It "works", but S3 cannot provide the fsync / atomic-rename / locking
-> semantics PostgreSQL's durability depends on (crash → corruption risk), and
-> every random write is an object round-trip: schema creation took ~13 min
-> instead of < 1. It also makes the migration rehearsal and load test
-> meaningless. Move to a local/block PV before either of those.
+> **Known limitation — staging PG is on S3/FUSE, by necessity.** The staging
+> cluster's only storage driver is `ru.yandex.s3.csi` (geesefs); there is no
+> block or file class. PostgreSQL runs on it but: every random write is an
+> object round-trip (schema creation ~13 min instead of < 1), and S3 cannot
+> give fsync/atomic-rename semantics, so a hard crash may need the
+> wipe-and-recreate in "Lessons" §2. **Accepted for staging** — it validates
+> behaviour (clustering, TLS, probes, realm import, login flows). It does
+> **not** validate load-test numbers or migration import timings; measure
+> those against a real PostgreSQL (ideally a staging database on the client's
+> VM/NFS PG stack — the most faithful rehearsal of production anyway).
+> Production is unaffected: its PostgreSQL is external (VMs + NFS), and prod
+> Keycloak pods need no PVs at all.
 
 ## 1. Keycloak operator — BOTH clusters
 

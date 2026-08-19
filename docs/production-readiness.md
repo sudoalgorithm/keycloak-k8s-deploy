@@ -106,3 +106,14 @@ the end) and the interim shortcuts **do not** carry over.
 If any production item is tempted toward the staging column "just to get it
 up", stop: that is the restart loop and half-applied schema from staging
 waiting to happen on a system users depend on.
+
+## Note on what staging could and could not prove
+
+Staging PostgreSQL runs on the cluster's only storage — an S3/FUSE CSI — so
+staging validated **behaviour** (clustering, DB TLS, probes, realm import,
+login flows, operator lifecycle) but **not** throughput or timing. The k6
+load test (2× design peak) and the migration-import timing must be measured
+against a real PostgreSQL — ideally a staging database on the client's
+VM + NFS PG stack, which is also the most faithful rehearsal of production.
+Do not quote any staging-cluster performance numbers as evidence for the
+production sizing.

@@ -66,10 +66,14 @@ spec:
   # cluster). CNPG still creates the PVC itself (keycloak-pg-1); this template
   # pins it to our PV by name. Single-instance only — a 2nd instance would
   # need a 2nd PV and cannot share this volumeName.
-  # !! The PV MUST be block/local storage. An S3/FUSE-backed PV (as first
-  # used on staging, driver ru.yandex.s3.csi/geesefs) cannot give PostgreSQL
-  # fsync/atomic-rename semantics: corruption risk + ~13 min schema creation.
-  # Replace with a local/block PV before the migration rehearsal/load test.
+  # KNOWN LIMITATION (accepted for staging): the only storage on the staging
+  # cluster is the S3 CSI (ru.yandex.s3.csi/geesefs), so this PV is an S3
+  # bucket via FUSE. PostgreSQL runs on it, but slowly (schema creation ~13 min
+  # vs <1 on disk) and without real fsync semantics (a hard crash may need the
+  # wipe-and-recreate from install-notes). Staging therefore validates
+  # BEHAVIOUR (clustering, TLS, probes, realm import, logins) — NOT load-test
+  # numbers or migration timings; those are measured against a real
+  # PostgreSQL. Production is unaffected: its PG is external (VMs + NFS).
   storage:
     size: 50Gi
     pvcTemplate:
