@@ -336,23 +336,50 @@ plus an explicit **403 route for `/admin` and `/realms/master`**, and the
 rate-limiting + request-size-limiting plugins on the token route (design spec
 §2.2). Kong must forward `X-Forwarded-For/-Proto/-Host`.
 
-**Why two layers protect the console.** `hostname.admin` makes Keycloak
-serve the admin console and Admin API *only* on the internal URL — a request
-for `/admin` on the public hostname is refused by Keycloak itself, even if a
-gateway ever routed it. HAProxy's internal-only frontend + Kong's 403 are
-the network layers on top. The two NodePorts are deliberately separate
-services so the admin one can never be "the one Kong points at" by accident.
+**Where the console is actually protected — the reverse proxy, not
+Keycloak.** Verified on staging and stated plainly in the Keycloak docs:
+`hostname.admin` only changes the URLs Keycloak *generates* (console links
+and the console's API calls target the admin host); it does **not** restrict
+access — `GET /admin/master/console/` on the public hostname still returns
+200. Enforcement is the proxies' job, and the Keycloak HAProxy guide gives
+the exact pattern. Hand this to the HAProxy team for `t-mp-k8sw6`:
+
+```haproxy
+# ---- public frontend (what Kong hits) : allow ONLY the public OIDC paths
+acl is_public_path path_beg /realms/<realm>/protocol/openid-connect/ /realms/<realm>/.well-known/
+http-request deny if !is_public_path          # /admin, /realms/master, /metrics ... -> 403
+default_backend keycloak-public               # workers :31080
+
+# ---- admin frontend (internal port) : allow ONLY the RCRC jump servers
+acl is_allowed_src src <rcrc-jump-server-ips-or-cidr>
+http-request deny if !is_allowed_src
+default_backend keycloak-admin                # workers :31180
+```
+
+Kong's explicit 403 on `/admin` and `/realms/master` is the second layer in
+front of the public frontend; `hostname.admin` is the third (the console only
+*functions* from the admin URL because its API calls go there). The two
+NodePorts are deliberately separate services so the admin one can never be
+"the one Kong points at" by accident.
+
+HAProxy health checks: use `GET /realms/master` (200) on the NodePort, not
+`/` (Keycloak redirects `/`, which some check configs treat as down).
 
 Before applying, confirm the ports are free:
 ```bash
 kubectl get svc -A -o jsonpath='{range .items[*]}{.spec.ports[*].nodePort}{"\n"}{end}' | grep -E '^(31080|31180)$' || echo "both free"
 ```
 
-After applying, verify from a jump server:
+After applying, verify:
 ```bash
-curl -s http://<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>/admin/ -o /dev/null -w '%{http_code}\n'   # 200/302
-# and that the PUBLIC hostname refuses the console (through Kong, once routed):
-curl -s https://auth-staging.<CLIENT-DOMAIN>/admin/ -o /dev/null -w '%{http_code}\n'              # 403 (Kong) — or 404/redirect-to-admin-host from Keycloak
+# NodePort layer (from the jumpserver, any worker IP) — both answered on staging 2026-08-19:
+curl -s http://<worker-ip>:31180/admin/master/console/ -o /dev/null -w '%{http_code}\n'     # 200
+curl -s http://<worker-ip>:31080/realms/master/.well-known/openid-configuration | head -c 80  # issuer = public hostname
+
+# Proxy layer (once HAProxy/Kong are configured) — THIS is the access-control test:
+curl -s http://<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>/admin/master/console/ -o /dev/null -w '%{http_code}\n'   # 200 from a jump server, 403 from anywhere else
+curl -s https://auth-staging.<CLIENT-DOMAIN>/admin/master/console/ -o /dev/null -w '%{http_code}\n'                # 403 (HAProxy/Kong deny)
+curl -s https://auth-staging.<CLIENT-DOMAIN>/realms/master/.well-known/openid-configuration -o /dev/null -w '%{http_code}\n'  # 403 too — master realm is not public
 ```
 
 Also delete the inert `keycloak-ingress` (no class, no controller on the

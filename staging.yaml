@@ -141,10 +141,12 @@ spec:
     httpEnabled: true # TLS terminates at the nginx LB in front of Kong
   hostname:
     hostname: https://auth-staging.<CLIENT-DOMAIN>
-    # Admin console + Admin API are served ONLY on this URL (Keycloak refuses
-    # /admin on the public hostname above — even if a gateway ever routed it).
-    # It is the internal HAProxy admin frontend, reachable from the RCRC jump
-    # servers only; it must never appear in public DNS or in Kong.
+    # The URL Keycloak GENERATES for the admin console + Admin API (console
+    # links/API calls target this host). NOTE: per the Keycloak docs this does
+    # NOT restrict access — /admin is still answered on the public hostname;
+    # enforcement is at the reverse proxy (HAProxy allow-lists + Kong 403, see
+    # install-notes 4b). It is the internal HAProxy admin frontend, reachable
+    # from the RCRC jump servers only; never in public DNS or Kong.
     admin: http://<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>
   proxy:
     headers: xforwarded
@@ -184,8 +186,11 @@ spec:
 #           (token, introspect, userinfo, logout, certs, .well-known) and
 #           returns 403 for /admin and /realms/master.
 #   ADMIN   RCRC jump servers → HAProxy (internal frontend) → keycloak-admin-np (31180)
-#           Never in Kong, never in public DNS. hostname.admin above makes
-#           Keycloak serve the console on this path only.
+#           Never in Kong, never in public DNS. Access control is ENFORCED
+#           here: HAProxy public frontend allows only the OIDC paths (denies
+#           /admin, /realms/master), admin frontend allows only the jump
+#           servers. hostname.admin above only makes the console's own links
+#           point here — it is not an access restriction (Keycloak docs).
 #
 # The operator's own keycloak-service (ClusterIP) stays untouched.
 # ----------------------------------------------------------------------------

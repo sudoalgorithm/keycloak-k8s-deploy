@@ -70,8 +70,11 @@ diff staging.yaml production.yaml
   `keycloak-np` (31080) is the public path (nginx → Kong → HAProxy; Kong
   routes only the OIDC endpoints), `keycloak-admin-np` (31180) is the admin
   console on an internal HAProxy frontend reachable from the RCRC jump
-  servers only. `hostname.admin` makes Keycloak serve the console on that
-  internal URL exclusively.
+  servers only. Access control is enforced at HAProxy (public frontend
+  allows only the OIDC paths; admin frontend allows only the jump servers)
+  and Kong (403 on `/admin`, `/realms/master`); `hostname.admin` just makes
+  the console's own links point at the internal URL — Keycloak itself does
+  not restrict `/admin` by hostname.
 - **DB TLS:** connections to PostgreSQL use `db-tls-mode: verify-server` with
   the server CA mounted as a Keycloak truststore. Staging gets the CA for free
   from CloudNativePG (`keycloak-pg-ca`); production needs the external
