@@ -23,6 +23,10 @@
 #   <CLIENT-PG-RW-ENDPOINT>  — the client PG cluster's read-write endpoint
 #                              (VIP / Patroni proxy / PgBouncer front — open
 #                              item #1 in the design spec)
+#   <ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>
+#                            — the internal HAProxy frontend for the admin
+#                              console (reachable from RCRC jump servers only)
+#   NodePorts 31080 (public) / 31180 (admin) — change if taken on the cluster
 #
 # Apply:    kubectl apply -f production.yaml
 # Verify:   kubectl -n keycloak wait --for=condition=Ready keycloak/keycloak --timeout=15m
@@ -78,6 +82,11 @@ spec:
     httpEnabled: true # TLS terminates at the nginx LB in front of Kong
   hostname:
     hostname: https://auth.<CLIENT-DOMAIN>
+    # Admin console + Admin API are served ONLY on this URL (Keycloak refuses
+    # /admin on the public hostname above — even if a gateway ever routed it).
+    # It is the internal HAProxy admin frontend, reachable from the RCRC jump
+    # servers only; it must never appear in public DNS or in Kong.
+    admin: http://<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>
   proxy:
     headers: xforwarded
   bootstrapAdmin:
@@ -108,6 +117,58 @@ spec:
     limits:
       cpu: "3"
       memory: 3Gi
+---
+# ----------------------------------------------------------------------------
+# Exposure — the cluster convention is NodePort behind HAProxy. Two separate
+# services so the two paths can never be confused:
+#
+#   PUBLIC  internet → nginx (TLS) → Kong → HAProxy → keycloak-np (31080)
+#           Kong routes ONLY the public OIDC paths of the client realm
+#           (token, introspect, userinfo, logout, certs, .well-known) and
+#           returns 403 for /admin and /realms/master.
+#   ADMIN   RCRC jump servers → HAProxy (internal frontend) → keycloak-admin-np (31180)
+#           Never in Kong, never in public DNS. hostname.admin above makes
+#           Keycloak serve the console on this path only.
+#
+# The operator's own keycloak-service (ClusterIP) stays untouched.
+# ----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-np
+  namespace: keycloak
+  annotations:
+    description: "PUBLIC OIDC endpoints — HAProxy backend for the Kong route"
+spec:
+  type: NodePort
+  selector:
+    app: keycloak
+    app.kubernetes.io/managed-by: keycloak-operator
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 31080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-admin-np
+  namespace: keycloak
+  annotations:
+    description: "ADMIN CONSOLE — internal only. HAProxy admin frontend (RCRC jump servers). NEVER map into Kong."
+spec:
+  type: NodePort
+  selector:
+    app: keycloak
+    app.kubernetes.io/managed-by: keycloak-operator
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 31180
 ---
 # ----------------------------------------------------------------------------
 # Survive voluntary disruptions (node drains, upgrades): always keep 2 of 3.

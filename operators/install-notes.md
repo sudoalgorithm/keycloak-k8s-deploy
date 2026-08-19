@@ -301,6 +301,59 @@ curl -s http://localhost:8080/realms/master/.well-known/openid-configuration | h
 kill %1
 ```
 
+## 4b. Exposure — NodePorts, HAProxy, Kong (both environments)
+
+The client's traffic pattern (confirmed 2026-08-19):
+
+```
+PUBLIC  internet → nginx (TLS) → Kong → HAProxy → NodePort keycloak-np (31080)
+ADMIN   RCRC jump servers → HAProxy (internal frontend) → NodePort keycloak-admin-np (31180)
+```
+
+Both YAML files create the two NodePort services. What each team needs:
+
+**HAProxy team** — two backends, pointing at the worker nodes:
+- public backend → `<worker-ips>:31080`, exposed to Kong only;
+- admin backend → `<worker-ips>:31180`, on an **internal frontend reachable
+  from the RCRC jump servers only** — this frontend's host:port is what goes
+  into `hostname.admin` in the YAML (`<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>`).
+  Ask for a stable DNS name for it rather than an IP if at all possible.
+
+**Kong team** — one service on the public HAProxy backend, routing **only**:
+```
+/realms/<realm>/protocol/openid-connect/token
+/realms/<realm>/protocol/openid-connect/token/introspect
+/realms/<realm>/protocol/openid-connect/userinfo
+/realms/<realm>/protocol/openid-connect/logout
+/realms/<realm>/protocol/openid-connect/certs
+/realms/<realm>/.well-known/openid-configuration
+```
+plus an explicit **403 route for `/admin` and `/realms/master`**, and the
+rate-limiting + request-size-limiting plugins on the token route (design spec
+§2.2). Kong must forward `X-Forwarded-For/-Proto/-Host`.
+
+**Why two layers protect the console.** `hostname.admin` makes Keycloak
+serve the admin console and Admin API *only* on the internal URL — a request
+for `/admin` on the public hostname is refused by Keycloak itself, even if a
+gateway ever routed it. HAProxy's internal-only frontend + Kong's 403 are
+the network layers on top. The two NodePorts are deliberately separate
+services so the admin one can never be "the one Kong points at" by accident.
+
+Before applying, confirm the ports are free:
+```bash
+kubectl get svc -A -o jsonpath='{range .items[*]}{.spec.ports[*].nodePort}{"\n"}{end}' | grep -E '^(31080|31180)$' || echo "both free"
+```
+
+After applying, verify from a jump server:
+```bash
+curl -s http://<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>/admin/ -o /dev/null -w '%{http_code}\n'   # 200/302
+# and that the PUBLIC hostname refuses the console (through Kong, once routed):
+curl -s https://auth-staging.<CLIENT-DOMAIN>/admin/ -o /dev/null -w '%{http_code}\n'              # 403 (Kong) — or 404/redirect-to-admin-host from Keycloak
+```
+
+Also delete the inert `keycloak-ingress` (no class, no controller on the
+cluster) so it doesn't mislead: `kubectl -n keycloak delete ingress keycloak-ingress`.
+
 ## 5. Deploy production (after staging validates)
 
 Replace `<CLIENT-DOMAIN>`, `<REGISTRY>`, and `<CLIENT-PG-RW-ENDPOINT>` in
@@ -313,9 +366,9 @@ kubectl -n keycloak wait --for=condition=Ready keycloak/keycloak --timeout=15m
 kubectl -n keycloak get pods -o wide   # 3 pods on 3 nodes
 ```
 
-Kong is pointed at `keycloak-service.keycloak.svc:8080` (how Kong reaches
-cluster services is open item #2 in the design spec — resolve with the client
-before cutover).
+Kong reaches Keycloak via HAProxy → NodePort `keycloak-np` (31080); the admin
+console via the internal HAProxy frontend → `keycloak-admin-np` (31180). See
+step 4b.
 
 ## Lessons from the first staging deploy (2026-08-19)
 

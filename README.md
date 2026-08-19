@@ -66,6 +66,12 @@ diff staging.yaml production.yaml
 - **TLS** terminates at the load balancer in front of the API gateway;
   Keycloak runs `http-enabled=true` with `proxy.headers=xforwarded` and a
   pinned public hostname so issued tokens carry the correct issuer URL.
+- **Exposure** follows the cluster convention — NodePort behind HAProxy:
+  `keycloak-np` (31080) is the public path (nginx → Kong → HAProxy; Kong
+  routes only the OIDC endpoints), `keycloak-admin-np` (31180) is the admin
+  console on an internal HAProxy frontend reachable from the RCRC jump
+  servers only. `hostname.admin` makes Keycloak serve the console on that
+  internal URL exclusively.
 - **DB TLS:** connections to PostgreSQL use `db-tls-mode: verify-server` with
   the server CA mounted as a Keycloak truststore. Staging gets the CA for free
   from CloudNativePG (`keycloak-pg-ca`); production needs the external

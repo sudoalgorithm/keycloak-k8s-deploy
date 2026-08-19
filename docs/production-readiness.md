@@ -27,7 +27,10 @@ the end) and the interim shortcuts **do not** carry over.
       vendor (invisible cutover) or new (apps update base URL).
 - [ ] **≥ 3 schedulable worker nodes** on the prod cluster
       (`kubectl get nodes`, check taints) — otherwise 3 pods cannot spread.
-- [ ] How Kong reaches cluster services (NodePort / routable pods / other).
+- [ ] HAProxy: public backend → `:31080`, internal admin frontend →
+      `:31180` (RCRC jump servers only); the admin frontend's host:port
+      filled into `hostname.admin` (`<ADMIN-HAPROXY-HOST>:<ADMIN-HAPROXY-PORT>`).
+      (Kong → HAProxy → NodePort is the confirmed traffic pattern.)
 - [ ] GitLab registry reachable **from the prod cluster nodes**; deploy token
       with `read_registry`.
 
@@ -87,7 +90,9 @@ the end) and the interim shortcuts **do not** carry over.
       disable/rotate the bootstrap user. Store credentials in the client
       vault.
 - [ ] Kong: only the public OIDC paths routed; `/admin` and `/realms/master`
-      return 403 through Kong (test it).
+      return 403 through Kong (test it). Admin console reachable from an
+      RCRC jump server via the HAProxy admin frontend, and **not** via the
+      public hostname (test both).
 - [ ] `production.yaml` committed exactly as applied (minus secrets).
 
 ---
