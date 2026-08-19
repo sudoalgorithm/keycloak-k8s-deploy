@@ -36,13 +36,17 @@ carry the email-or-phone authenticator JAR.
 
 | | Staging | Production |
 |---|---|---|
-| Keycloak | 3 instances (operator-managed) | 3 instances (operator-managed) |
-| Resources per pod | 500m / 1200Mi (limits 1 CPU / 1500Mi) | 1500m / 2Gi (limits 3 CPU / 3Gi) |
-| PostgreSQL | In-cluster CloudNativePG, primary + replica | External HA cluster (read-write endpoint) |
-| DB pool | 20 connections per pod (60 total) | 20 connections per pod (60 total) |
+| Keycloak | 2 instances (operator-managed) | 3 instances (operator-managed) |
+| Resources per pod | 500m / 1200Mi (limits 2 CPU interim / 1500Mi) | 1500m / 2Gi (limits 3 CPU / 3Gi) |
+| Image | stock `26.5.2`, `startOptimized: false` (interim, builds at start) | `26.5.2-optimized`, `startOptimized: true` |
+| PostgreSQL | In-cluster CloudNativePG, 1 instance (2 once a second PV exists) | External HA cluster (read-write endpoint) |
+| DB pool | 20 connections per pod (40 total) | 20 connections per pod (60 total) |
 | Hostname | `https://auth-staging.<CLIENT-DOMAIN>` | `https://auth.<CLIENT-DOMAIN>` |
 | DB TLS | `verify-server` against the CNPG-generated CA | `verify-server` against the DBA-provided CA |
-| Disruption budget | `minAvailable: 2` | `minAvailable: 2` |
+| Disruption budget | `minAvailable: 1` | `minAvailable: 2` |
+
+Staging was first brought up 2026-08-19 on this shape (see install-notes
+"Lessons from the first staging deploy").
 
 Both environments are deliberately the same shape so staging genuinely
 rehearses production behavior (clustering, pod spreading, rolling upgrades,

@@ -294,6 +294,53 @@ Kong is pointed at `keycloak-service.keycloak.svc:8080` (how Kong reaches
 cluster services is open item #2 in the design spec — resolve with the client
 before cutover).
 
+## Lessons from the first staging deploy (2026-08-19)
+
+Recorded so the next person recognises the symptoms in seconds.
+
+**1. Stock image + `startOptimized: false` restart-loops under CPU limits.**
+Log stops at *"Updating the configuration and installing your custom
+providers… Please wait"*, exit code 143, restarts climb into the hundreds.
+The in-pod `kc.sh build` is starved by a 1-CPU limit and the startup probe
+kills it first. No-image-build workaround (what staging runs today):
+
+```bash
+kubectl -n keycloak patch keycloak keycloak --type merge -p '{
+  "spec": {"startupProbe": {"periodSeconds": 5, "failureThreshold": 240},
+           "resources": {"limits": {"cpu": "2", "memory": "1500Mi"},
+                         "requests": {"cpu": "500m", "memory": "1200Mi"}}}}'
+```
+
+Real fix: the pre-optimized image (step 0b). Every pod start then takes
+seconds instead of minutes — required before production.
+
+**2. A Keycloak killed mid-first-start leaves a half-applied schema.** Next
+start fails with a Liquibase error like *`column "user_setup_allowed" of
+relation "authentication_execution" does not exist`* at changeset 1.5.0. The
+changelog tracker and the real tables disagree. On a **fresh, empty**
+staging DB (never on one holding migrated data) wipe and let Keycloak create
+it cleanly:
+
+```bash
+kubectl -n keycloak exec -it keycloak-pg-1 -- psql -U postgres -d keycloak -c \
+  "DROP SCHEMA public CASCADE; CREATE SCHEMA public; ALTER SCHEMA public OWNER TO keycloak; GRANT ALL ON SCHEMA public TO keycloak;"
+kubectl -n keycloak delete pod keycloak-0
+```
+
+Healthy first start then logs *"Initializing database schema"* (not
+*"Updating"*), and on a cold DB takes ~15 min end to end — the table count
+(`SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`)
+climbing toward ~95 shows it is progressing.
+
+**3. PDB must track the instance count.** `instances: 2` with
+`minAvailable: 2` means zero allowed disruptions — drains block forever.
+Staging runs 2/1, production 3/2.
+
+**4. Validation that passed** (the checklist in step 4): pods on distinct
+nodes, PDB allows 1 disruption, `Received new cluster view … (2)` in the
+logs (one Infinispan cluster, not two singletons), DB TLS `verify-server`
+working, `.well-known` issuer equals the pinned hostname.
+
 ## Keeping the two files in sync
 
 `staging.yaml` and `production.yaml` are hand-maintained parallels. After any

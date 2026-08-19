@@ -24,10 +24,11 @@ metadata:
   name: keycloak
 ---
 # ----------------------------------------------------------------------------
-# Staging PostgreSQL — CloudNativePG, primary + replica.
+# Staging PostgreSQL — CloudNativePG.
 # Provides the same contract as the client's production cluster:
 #   - stable read-write endpoint:  keycloak-pg-rw.keycloak.svc
-#   - automatic failover (promote replica if the primary dies)
+#   - automatic failover once a replica exists (instances: 2 — needs a
+#     second pre-provisioned PV; currently 1, see install-notes 0c)
 # CNPG auto-generates Secret `keycloak-pg-app` (keys username/password) for the
 # `keycloak` database owner — the Keycloak CR below consumes it directly.
 # ----------------------------------------------------------------------------
@@ -37,7 +38,9 @@ metadata:
   name: keycloak-pg
   namespace: keycloak
 spec:
-  instances: 2
+  # Staging runs a single instance for now (one static PV available). Raise
+  # to 2 once a second PV exists — CNPG clones the primary online, no rebuild.
+  instances: 1
   imageName: <REGISTRY>/cloudnative-pg/postgresql:16 # mirrored from ghcr.io
   # imagePullSecrets:               # uncomment if the registry requires auth
   #   - name: registry-credentials
@@ -61,11 +64,11 @@ spec:
       owner: keycloak
 ---
 # ----------------------------------------------------------------------------
-# Keycloak — 3 instances, operator-managed.
+# Keycloak — operator-managed.
 # Same shape as production (clustering, spreading, rolling upgrades all get
-# rehearsed); only resources, hostname, and the DB source differ.
-# Since Keycloak 26.0 the operator applies default anti-affinity so pods of
-# this CR avoid sharing a node — the cluster needs >= 3 schedulable nodes.
+# rehearsed); only instance count, resources, hostname, and the DB source
+# differ. Since Keycloak 26.0 the operator applies default anti-affinity so
+# pods of this CR avoid sharing a node.
 # ----------------------------------------------------------------------------
 apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak
@@ -73,16 +76,25 @@ metadata:
   name: keycloak
   namespace: keycloak
 spec:
-  instances: 3
-  # Air-gapped cluster: PRE-OPTIMIZED image built inside the gap from the
-  # mirrored stock image (build/keycloak-optimized/Dockerfile) and pushed to
-  # the internal registry. Must match the operator version exactly.
-  # startOptimized: true — the build step is baked in, so pods start in
-  # seconds. Do NOT point this at the plain stock image with startOptimized
-  # false: Keycloak then re-runs `kc.sh build` on every start, which under the
-  # CPU limits takes minutes, fails the startup probe and restart-loops.
-  image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
-  startOptimized: true
+  # Staging runs 2 (production: 3). Enough to prove clustering, spreading and
+  # rolling restarts; the 3-node spread / N-1 capacity claim is a prod check.
+  instances: 2
+  # CURRENT (interim): the mirrored STOCK image with startOptimized: false.
+  # Keycloak re-runs `kc.sh build` on every pod start (~40-100 s), which only
+  # works because the CPU limit and startup probe below are raised to cover
+  # it. TARGET: the pre-optimized image (build/keycloak-optimized/Dockerfile)
+  # with startOptimized: true — pods start in seconds, and the interim
+  # cpu/probe values can return to design values. Switch as soon as a
+  # machine inside the gap with docker + registry push is available.
+  image: <REGISTRY>/keycloak/keycloak:26.5.2
+  startOptimized: false
+  # image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
+  # startOptimized: true
+  # Interim: give the in-pod build time to finish (5 s x 240 = 20 min cap).
+  # Remove once the optimized image is in use (operator default is fine then).
+  startupProbe:
+    periodSeconds: 5
+    failureThreshold: 240
   # imagePullSecrets:               # uncomment if the registry requires auth
   #   - name: registry-credentials
   db:
@@ -95,8 +107,8 @@ spec:
     passwordSecret:
       name: keycloak-pg-app
       key: password
-    # Fixed-size pool, 20 per pod x 3 pods = 60, inside the 70-connection
-    # budget (60 app + 10 ops) agreed with the client.
+    # Fixed-size pool, 20 per pod (production: x3 = 60, inside the 70-connection
+    # budget of 60 app + 10 ops agreed with the client).
     poolMinSize: 20
     poolInitialSize: 20
     poolMaxSize: 20
@@ -130,11 +142,12 @@ spec:
       cpu: 500m
       memory: 1200Mi
     limits:
-      cpu: "1"
+      cpu: "2" # interim: "1" starves the in-pod build; back to "1" with the optimized image
       memory: 1500Mi
 ---
 # ----------------------------------------------------------------------------
-# Survive voluntary disruptions (node drains, upgrades): always keep 2 of 3.
+# Survive voluntary disruptions (node drains, upgrades): with 2 instances,
+# always keep 1 (production: 3 instances, minAvailable 2).
 # Label selector matches the pods the operator creates for the CR above.
 # ----------------------------------------------------------------------------
 apiVersion: policy/v1
@@ -143,7 +156,7 @@ metadata:
   name: keycloak
   namespace: keycloak
 spec:
-  minAvailable: 2
+  minAvailable: 1
   selector:
     matchLabels:
       app: keycloak
