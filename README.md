@@ -15,31 +15,29 @@ or mirrored into the internal container registry beforehand.
 │   ├── install-notes.md       # step-by-step: image mirroring, operator installs, secrets, deploy, validation
 │   ├── keycloak-operator/     # vendored official manifests, tag 26.5.2 (unmodified)
 │   └── cnpg/                  # vendored official CNPG manifest 1.25.1 (unmodified)
-├── build/
-│   └── keycloak-optimized/    # Dockerfile: pre-optimized Keycloak image, built INSIDE the gap
 └── docs/
     ├── manifests-explained.md   # field-by-field walkthrough of the two YAML files
     └── production-readiness.md  # the gate: every box checked before production is applied
 ```
 
-**Images: mirrored, plus one in-gap build.** The four **official** images
-(Keycloak server + operator, CNPG operator + PostgreSQL) are never rebuilt —
-they are pulled on a connected machine, saved to tar, carried across the gap
-through the approved channel, and pushed to the internal registry
-(install-notes step 0). The one image we build is the **pre-optimized
-Keycloak** (`build/keycloak-optimized/`): its base is the mirrored stock
-image, so it builds with no internet, and it bakes in `kc.sh build` so pods
-start in seconds instead of re-building on every start (which restart-loops
-under the pod CPU limits — install-notes 0b). The same Dockerfile will later
-carry the email-or-phone authenticator JAR.
+**Images: official only, mirrored — nothing is built.** The four official
+images (Keycloak server + operator, CNPG operator + PostgreSQL) are pulled on
+a connected machine, saved to tar, carried across the gap through the approved
+channel, and pushed to the internal registry (install-notes step 0). Keycloak
+runs the **stock image in the operator's standard mode** (`startOptimized:
+false`): it performs its `kc.sh build` as part of every pod start, and the CR
+sizes the CPU limit and startup probe for that. Deliberate trade-off — a
+restarted pod rejoins in ~1–2 min rather than ~30 s — in exchange for zero
+custom artifacts to build, sign, or maintain inside the air gap.
 
 ## What gets deployed
 
 | | Staging | Production |
 |---|---|---|
 | Keycloak | 2 instances (operator-managed) | 3 instances (operator-managed) |
-| Resources per pod | 500m / 1200Mi (limits 2 CPU interim / 1500Mi) | 1500m / 2Gi (limits 3 CPU / 3Gi) |
-| Image | stock `26.5.2`, `startOptimized: false` (interim, builds at start) | `26.5.2-optimized`, `startOptimized: true` |
+| Resources per pod | 500m / 1200Mi (limits 2 CPU / 1500Mi) | 1500m / 2Gi (limits 3 CPU / 3Gi) |
+| Image | stock `26.5.2`, `startOptimized: false` | stock `26.5.2`, `startOptimized: false` |
+| Startup probe | 5 s × 120 (covers the in-pod build) | 5 s × 120 |
 | PostgreSQL | In-cluster CloudNativePG, 1 instance (2 once a second PV exists) | External HA cluster (read-write endpoint) |
 | DB pool | 20 connections per pod (40 total) | 20 connections per pod (60 total) |
 | Hostname | `https://auth-staging.<CLIENT-DOMAIN>` | `https://auth.<CLIENT-DOMAIN>` |
@@ -83,7 +81,8 @@ diff staging.yaml production.yaml
   machine, transferred, and pushed to the internal registry; `<REGISTRY>` in
   the YAML files points at it. Operator manifests are applied from the
   vendored copies in this repo, never from URLs. The Keycloak CR pins the
-  in-gap-built `26.5.2-optimized` image with `startOptimized: true`.
+  mirrored stock `26.5.2` image (`startOptimized: false`, operator standard
+  mode).
 - **Versions** are pinned (Keycloak operator `26.5.2`, CloudNativePG `1.25.1`).
   Bump patch versions deliberately: re-vendor manifests + re-mirror images on
   a connected machine, then staging first, both files together.

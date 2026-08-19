@@ -41,15 +41,18 @@ metadata:
   namespace: keycloak
 spec:
   instances: 3
-  # Air-gapped cluster: PRE-OPTIMIZED image built inside the gap from the
-  # mirrored stock image (build/keycloak-optimized/Dockerfile) and pushed to
-  # the internal registry. Must match the operator version exactly.
-  # startOptimized: true — the build step is baked in, so pods start in
-  # seconds. Do NOT point this at the plain stock image with startOptimized
-  # false: Keycloak then re-runs `kc.sh build` on every start, which under the
-  # CPU limits takes minutes, fails the startup probe and restart-loops.
-  image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
-  startOptimized: true
+  # DESIGN DECISION: the official STOCK image, mirrored into the internal
+  # registry, with startOptimized: false — the operator's standard mode, no
+  # custom image anywhere. Keycloak runs `kc.sh build` as part of every pod
+  # start (~40 s at the 3-CPU design limit), so the startup probe is sized for
+  # it: 5 s x 120 = 10 min ceiling, normal start ~1-2 min. Accepted trade-off:
+  # a restarted pod rejoins in ~1-2 min instead of ~30 s; peak still fits on
+  # the remaining N-1 pods. Must match the operator version exactly.
+  image: <REGISTRY>/keycloak/keycloak:26.5.2
+  startOptimized: false
+  startupProbe:
+    periodSeconds: 5
+    failureThreshold: 120
   imagePullSecrets:
     - name: registry-creds # GitLab registry: auth is mandatory
   db:

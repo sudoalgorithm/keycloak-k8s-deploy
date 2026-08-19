@@ -145,30 +145,38 @@ spec:
     degraded-capacity state, not a split-brain risk.
 
 ```yaml
-  image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
-  startOptimized: true
+  image: <REGISTRY>/keycloak/keycloak:26.5.2
+  startOptimized: false
+  startupProbe:
+    periodSeconds: 5
+    failureThreshold: 120
 ```
 
 **Air-gapped clusters change the image story.** Normally the operator deploys
 its own matching image from quay.io — impossible without internet, so the
-image is pinned explicitly to the internal registry. Three consequences worth
-explaining:
+image is pinned explicitly to the mirrored copy in the internal registry. It
+must **match the operator version exactly** — operator and server are
+released and tested as a pair.
 
-- The image must **match the operator version exactly** — the operator and
-  server are released and tested as a pair.
-- It is a **pre-optimized** image (`build/keycloak-optimized/Dockerfile`):
-  the mirrored stock image plus a baked-in `kc.sh build` with our build-time
-  options (postgres driver, health, metrics). `startOptimized: true` tells
-  the operator to start it with `--optimized`, so a pod is serving in
-  seconds.
-- Why that matters, learned the hard way on staging: pointing the CR at the
-  plain stock image with `startOptimized: false` makes Keycloak re-run the
-  build on **every** pod start, before the health port opens. Under the pod
-  CPU limits that takes minutes, the startup probe gives up, the kubelet
-  kills the pod (exit 143) and it restart-loops indefinitely. Build once in
-  the image, never at start.
-- The same Dockerfile later carries the email-or-phone authenticator JAR —
-  new tag, same mechanism.
+**It is the stock image, run in the operator's standard mode.** Keycloak is
+a Quarkus app with a two-phase start: a *build* (wires in build-time options
+— database driver, health/metrics endpoints — ~40 s at 3 CPUs, longer with
+less) and then the actual *start* (seconds). `startOptimized: false` means
+every pod start runs both phases. That is a deliberate design decision:
+
+- **No custom image** anywhere — nothing to build, sign, or maintain inside
+  the air gap; the client team runs the official image, full stop.
+- The cost is start time: a restarted pod rejoins in ~1–2 min rather than
+  ~30 s. With 3 instances and peak sized for N-1 pods, that's a tolerable
+  degradation window.
+- Two CR fields are sized for the build, and they are *the* fix for the
+  restart loop staging hit: the **CPU limit** (1 CPU starves the build) and
+  the **`startupProbe`** (operator default gives up before the build ends;
+  5 s × 120 = 10-minute ceiling). Without them: log stops at *"Updating the
+  configuration…"*, exit 143, hundreds of restarts.
+
+The alternative Keycloak documents — a pre-optimized custom image with
+`startOptimized: true` for ~30 s starts — was considered and not adopted.
 
 ### 4.2 Database block
 

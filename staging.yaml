@@ -103,22 +103,19 @@ spec:
   # Staging runs 2 (production: 3). Enough to prove clustering, spreading and
   # rolling restarts; the 3-node spread / N-1 capacity claim is a prod check.
   instances: 2
-  # CURRENT (interim): the mirrored STOCK image with startOptimized: false.
-  # Keycloak re-runs `kc.sh build` on every pod start (~40-100 s), which only
-  # works because the CPU limit and startup probe below are raised to cover
-  # it. TARGET: the pre-optimized image (build/keycloak-optimized/Dockerfile)
-  # with startOptimized: true — pods start in seconds, and the interim
-  # cpu/probe values can return to design values. Switch as soon as a
-  # machine inside the gap with docker + registry push is available.
+  # DESIGN DECISION: the official STOCK image, mirrored into the internal
+  # registry, with startOptimized: false — the operator's standard mode, no
+  # custom image anywhere. Keycloak runs `kc.sh build` as part of every pod
+  # start (~40-100 s depending on CPU), so two CR fields are sized for it:
+  #   - resources.limits.cpu below (build is CPU-bound; 1 CPU starves it)
+  #   - startupProbe here: 5 s x 120 = 10 min ceiling, normal start ~1-2 min
+  # Accepted trade-off: a restarted pod rejoins in ~1-2 min instead of ~30 s.
+  # Must match the operator version exactly.
   image: <REGISTRY>/keycloak/keycloak:26.5.2
   startOptimized: false
-  # image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
-  # startOptimized: true
-  # Interim: give the in-pod build time to finish (5 s x 240 = 20 min cap).
-  # Remove once the optimized image is in use (operator default is fine then).
   startupProbe:
     periodSeconds: 5
-    failureThreshold: 240
+    failureThreshold: 120
   imagePullSecrets:
     - name: registry-creds # GitLab registry: auth is mandatory
   db:
@@ -166,7 +163,7 @@ spec:
       cpu: 500m
       memory: 1200Mi
     limits:
-      cpu: "2" # interim: "1" starves the in-pod build; back to "1" with the optimized image
+      cpu: "2" # covers the in-pod build (1 CPU starves it); prod design limit is 3
       memory: 1500Mi
 ---
 # ----------------------------------------------------------------------------

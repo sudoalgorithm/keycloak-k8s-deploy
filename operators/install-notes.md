@@ -133,23 +133,23 @@ assumptions:
    GitLab cleanup policies auto-delete tags on a schedule and would silently
    remove pinned images.
 
-## 0b. Build the pre-optimized Keycloak image — machine INSIDE the gap with registry access
+## 0b. Image mode — stock image, build at start (decision)
 
-**Required, not optional.** The stock image re-runs `kc.sh build` on every
-pod start; under the pod CPU limits that takes minutes, the startup probe
-gives up and the pod restart-loops forever (symptom: log stops at *"Updating
-the configuration and installing your custom providers… Please wait"*, exit
-code 143, hundreds of restarts). Baking the build in once fixes it:
+No custom Keycloak image is built. Both CRs run the mirrored **stock** image
+in the operator's standard mode, `startOptimized: false`: Keycloak performs
+its `kc.sh build` as part of every pod start. Two CR fields are sized for it
+(already set in both YAML files):
 
-```bash
-REGISTRY=<REGISTRY>
-docker build --build-arg REGISTRY=$REGISTRY \
-  -t $REGISTRY/keycloak/keycloak:26.5.2-optimized build/keycloak-optimized
-docker push $REGISTRY/keycloak/keycloak:26.5.2-optimized
-```
+- `resources.limits.cpu` — the build is CPU-bound; **1 CPU starves it** into
+  a probe-kill restart loop (see "Lessons" §1). Staging 2, production 3.
+- `startupProbe` — `periodSeconds: 5, failureThreshold: 120` (10-minute
+  ceiling; a normal start is ~1–2 min).
 
-Both YAML files reference this `-optimized` tag with `startOptimized: true`.
-The base is the mirrored stock image from step 0, so this needs no internet.
+Accepted trade-off: a restarted pod rejoins in ~1–2 min instead of ~30 s.
+With 3 instances and peak sized for N-1 pods, that is a tolerable window.
+The alternative (a pre-optimized custom image, `startOptimized: true`) is
+documented by Keycloak as an optional optimisation; it was deliberately not
+adopted to keep zero custom artifacts inside the air gap.
 
 ## 0c. Storage for the staging PostgreSQL — read before applying
 
@@ -321,21 +321,22 @@ before cutover).
 
 Recorded so the next person recognises the symptoms in seconds.
 
-**1. Stock image + `startOptimized: false` restart-loops under CPU limits.**
-Log stops at *"Updating the configuration and installing your custom
-providers… Please wait"*, exit code 143, restarts climb into the hundreds.
-The in-pod `kc.sh build` is starved by a 1-CPU limit and the startup probe
-kills it first. No-image-build workaround (what staging runs today):
+**1. The in-pod build restart-loops if CPU limit and startup probe aren't
+sized for it.** Log stops at *"Updating the configuration and installing your
+custom providers… Please wait"*, exit code 143, restarts climb into the
+hundreds. The `kc.sh build` that runs at every pod start is starved by a
+1-CPU limit and the operator's default startup probe kills it first. Fix
+(applied live, now the committed design):
 
 ```bash
 kubectl -n keycloak patch keycloak keycloak --type merge -p '{
-  "spec": {"startupProbe": {"periodSeconds": 5, "failureThreshold": 240},
+  "spec": {"startupProbe": {"periodSeconds": 5, "failureThreshold": 120},
            "resources": {"limits": {"cpu": "2", "memory": "1500Mi"},
                          "requests": {"cpu": "500m", "memory": "1200Mi"}}}}'
 ```
 
-Real fix: the pre-optimized image (step 0b). Every pod start then takes
-seconds instead of minutes — required before production.
+That is now the design (step 0b): stock image, CPU limit and startup probe
+sized for the in-pod build. Both YAML files carry the values.
 
 **2. A Keycloak killed mid-first-start leaves a half-applied schema.** Next
 start fails with a Liquibase error like *`column "user_setup_allowed" of
