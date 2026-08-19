@@ -4,13 +4,17 @@
 # No PostgreSQL here: production uses the client's external HA PostgreSQL
 # cluster via its stable read-write endpoint. Deliberately parallel to
 # staging.yaml — diff the two files to see exactly what differs
-# (DB source, hostname, resources; nothing else).
+# (instances 3 vs 2, resources, hostname, DB source + CA, PDB, and the CNPG
+# block that only staging has; nothing else).
 #
 # Prerequisites (exact commands in operators/install-notes.md):
 #   1. Keycloak operator installed in the `keycloak` namespace
-#   2. Secret `keycloak-db` created (keys: username, password) with the
-#      credentials of the `keycloak` database owner on the client's PG
-#   3. Secret `keycloak-bootstrap-admin` created (keys: username, password)
+#   2. Secret `registry-creds` (GitLab deploy token, read_registry)
+#   3. Secret `keycloak-db` (keys: username, password) — credentials of the
+#      `keycloak` database owner on the client's PG
+#   4. Secret `keycloak-db-ca` (key: ca.crt, PEM) — the client PG's server CA
+#   5. Secret `keycloak-bootstrap-admin` (keys: username, password)
+#   6. Every box in docs/production-readiness.md checked
 #
 # REPLACE BEFORE APPLYING:
 #   <CLIENT-DOMAIN>          — the client's production auth domain suffix
