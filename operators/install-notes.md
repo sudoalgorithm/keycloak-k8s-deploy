@@ -78,7 +78,11 @@ done
 
 The path layout in the registry mirrors upstream minus the host
 (`<REGISTRY>/keycloak/keycloak:26.5.2` etc.) — the YAML files and the `sed`
-substitutions below assume exactly this layout.
+substitutions below assume exactly this layout. **If your registry uses a
+flat layout instead** (e.g. `<project-path>/keycloak:26.5.2` with no
+`keycloak/` sub-path — as the staging GitLab project does), adjust the image
+references in the YAML files and the `sed` patterns accordingly; the image
+*names and tags* are what matter, the sub-path is just convention.
 
 > **Why images are mirrored, not built.** There are deliberately no
 > Dockerfiles in this repo: a `docker build` would itself pull a base image
