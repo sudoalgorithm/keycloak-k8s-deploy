@@ -18,7 +18,8 @@ or mirrored into the internal container registry beforehand.
 ├── build/
 │   └── keycloak-optimized/    # Dockerfile: pre-optimized Keycloak image, built INSIDE the gap
 └── docs/
-    └── manifests-explained.md # field-by-field walkthrough of the two YAML files
+    ├── manifests-explained.md   # field-by-field walkthrough of the two YAML files
+    └── production-readiness.md  # the gate: every box checked before production is applied
 ```
 
 **Images: mirrored, plus one in-gap build.** The four **official** images
@@ -106,7 +107,9 @@ Full command sequence, validation checklist included:
    files, `<CLIENT-PG-RW-ENDPOINT>` in `production.yaml`.
 5. `kubectl apply -f staging.yaml`, wait for `Ready`, run the validation
    checklist.
-6. Only after staging validates: `kubectl apply -f production.yaml`.
+6. Only after staging validates **and every box in
+   [`docs/production-readiness.md`](docs/production-readiness.md) is
+   checked**: `kubectl apply -f production.yaml`.
 
 ## Out of scope
 
