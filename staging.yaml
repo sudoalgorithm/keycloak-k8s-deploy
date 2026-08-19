@@ -42,8 +42,17 @@ spec:
   # to 2 once a second PV exists — CNPG clones the primary online, no rebuild.
   instances: 1
   imageName: <REGISTRY>/cloudnative-pg/postgresql:16 # mirrored from ghcr.io
-  # imagePullSecrets:               # uncomment if the registry requires auth
-  #   - name: registry-credentials
+  imagePullSecrets:
+    - name: registry-creds # GitLab registry: auth is mandatory
+  # Without requests the PG pod is BestEffort — first to be evicted under node
+  # pressure. Modest staging values; it is a light OLTP workload.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
   # Staging-only convenience: superuser access is needed when the migration
   # rehearsal restores the vendor dump into a scratch database. Never in prod
   # (prod PG is the client's anyway).
@@ -53,11 +62,22 @@ spec:
   # enforces a different owner (see install-notes 0c).
   postgresUID: 26
   postgresGID: 26
+  # Static, pre-provisioned PV (no dynamic provisioner on the staging
+  # cluster). CNPG still creates the PVC itself (keycloak-pg-1); this template
+  # pins it to our PV by name. Single-instance only — a 2nd instance would
+  # need a 2nd PV and cannot share this volumeName.
+  # !! The PV MUST be block/local storage. An S3/FUSE-backed PV (as first
+  # used on staging, driver ru.yandex.s3.csi/geesefs) cannot give PostgreSQL
+  # fsync/atomic-rename semantics: corruption risk + ~13 min schema creation.
+  # Replace with a local/block PV before the migration rehearsal/load test.
   storage:
-    size: 20Gi
-    # No dynamic provisioner? Pre-provision two PVs with this class and
-    # uncomment (install-notes 0c). CNPG creates PVCs keycloak-pg-1/-2 itself.
-    # storageClass: keycloak-pg
+    size: 50Gi
+    pvcTemplate:
+      storageClassName: ""
+      volumeName: keycloak-pg1-pv
+      resources:
+        requests:
+          storage: 50Gi
   bootstrap:
     initdb:
       database: keycloak
@@ -95,8 +115,8 @@ spec:
   startupProbe:
     periodSeconds: 5
     failureThreshold: 240
-  # imagePullSecrets:               # uncomment if the registry requires auth
-  #   - name: registry-credentials
+  imagePullSecrets:
+    - name: registry-creds # GitLab registry: auth is mandatory
   db:
     vendor: postgres
     host: keycloak-pg-rw.keycloak.svc

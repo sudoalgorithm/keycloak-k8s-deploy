@@ -88,16 +88,16 @@ substitutions below assume exactly this layout.
 > dump.
 
 If the registry requires authentication, additionally create a pull secret on
-each cluster (and uncomment the `imagePullSecrets` blocks in the YAML files):
+each cluster (both YAML files already reference it as `registry-creds`):
 
 ```bash
-kubectl -n keycloak create secret docker-registry registry-credentials \
+kubectl -n keycloak create secret docker-registry registry-creds \
   --docker-server=<REGISTRY-HOST> --docker-username=<USER> --docker-password=<PASS>
 # same again in cnpg-system on the staging cluster after step 2 creates it,
 # then: kubectl -n cnpg-system patch serviceaccount cnpg-manager \
-#         -p '{"imagePullSecrets":[{"name":"registry-credentials"}]}'
+#         -p '{"imagePullSecrets":[{"name":"registry-creds"}]}'
 #       kubectl -n keycloak patch serviceaccount keycloak-operator \
-#         -p '{"imagePullSecrets":[{"name":"registry-credentials"}]}'
+#         -p '{"imagePullSecrets":[{"name":"registry-creds"}]}'
 ```
 
 ### The client registry is GitLab — specifics
@@ -119,7 +119,7 @@ assumptions:
    to create/designate the project.
 
 2. **Auth is mandatory** (no anonymous pulls) — so the `imagePullSecrets`
-   blocks in both YAML files must be uncommented, and the pull-secret +
+   blocks in both YAML files (`registry-creds`) are live, and the pull-secret +
    service-account patches above are required, not optional. Tokens needed
    from the admin:
    - `write_registry` token — for `docker login` on the machine that pushes
@@ -154,22 +154,37 @@ The base is the mirrored stock image from step 0, so this needs no internet.
 ## 0c. Storage for the staging PostgreSQL — read before applying
 
 CloudNativePG **creates its own PVCs**, named `<cluster>-<n>` (`keycloak-pg-1`,
-`keycloak-pg-2`); it never adopts a pre-created PVC. If the cluster has no
-default StorageClass with dynamic provisioning (typical on bare kubeadm), you
-pre-provision **two** PVs (one per instance; for `local` volumes on two
-different nodes) and let CNPG's PVCs bind to them:
+`keycloak-pg-2`); it never adopts a pre-created PVC. A hand-made PVC (e.g.
+`keycloak-pg-pvc`) just sits unused — delete it, and if its PV is `Released`,
+free it: `kubectl patch pv <pv> -p '{"spec":{"claimRef":null}}'`.
 
-- each PV: ≥ 20Gi, `ReadWriteOnce`, `storageClassName: keycloak-pg`
-  (any name, used consistently), `Retain`;
-- the backing directory owned by the PostgreSQL UID/GID — default `26:26`
-  in the CNPG image (`chown -R 26:26 <dir> && chmod 700 <dir>`), or set
-  `postgresUID`/`postgresGID` in the CNPG spec to whatever the storage
-  enforces;
-- then uncomment `storageClass: keycloak-pg` in `staging.yaml`.
+With no dynamic provisioner (bare kubeadm), pre-provision a PV and pin CNPG's
+PVC to it — this is what staging runs:
 
-A hand-made PVC (e.g. `keycloak-pg-pvc`) just sits unused — delete it, and
-if its PV is `Released`, free it: `kubectl patch pv <pv> -p
-'{"spec":{"claimRef":null}}'`.
+```yaml
+  storage:
+    size: 50Gi
+    pvcTemplate:
+      storageClassName: ""          # static binding, no provisioner
+      volumeName: keycloak-pg1-pv   # your PV's name
+      resources: {requests: {storage: 50Gi}}
+```
+
+- PV: ≥ the requested size, `ReadWriteOnce`, `Retain`; backing directory
+  owned by the PostgreSQL UID/GID (`26:26` in the CNPG image — `chown -R
+  26:26 <dir> && chmod 700 <dir>`), or set `postgresUID`/`postgresGID` to
+  what the storage enforces.
+- `volumeName` pins **one** PVC to **one** PV, so this form is single-instance
+  only. For a replica (`instances: 2`) use a shared `storageClassName` on two
+  PVs (different nodes for `local` volumes) instead of `volumeName`.
+
+> **⚠️ The PV must be block or local storage — not S3/FUSE.** Staging was
+> first deployed on a `ru.yandex.s3.csi` (geesefs) PV backed by an S3 bucket.
+> It "works", but S3 cannot provide the fsync / atomic-rename / locking
+> semantics PostgreSQL's durability depends on (crash → corruption risk), and
+> every random write is an object round-trip: schema creation took ~13 min
+> instead of < 1. It also makes the migration rehearsal and load test
+> meaningless. Move to a local/block PV before either of those.
 
 ## 1. Keycloak operator — BOTH clusters
 
@@ -187,8 +202,11 @@ kubectl create namespace keycloak
 kubectl apply -f operators/keycloak-operator/keycloaks.k8s.keycloak.org-v1.yml
 kubectl apply -f operators/keycloak-operator/keycloakrealmimports.k8s.keycloak.org-v1.yml
 
-# the operator itself, image rewritten to the internal registry
-sed "s|quay.io/keycloak/keycloak-operator|$REGISTRY/keycloak/keycloak-operator|g" \
+# the operator itself, image rewritten to the internal registry — both its
+# own image AND RELATED_IMAGE_KEYCLOAK (the default server image it would use
+# for anything not pinned by spec.image), so nothing can ever reference quay.io
+sed -e "s|quay.io/keycloak/keycloak-operator|$REGISTRY/keycloak/keycloak-operator|g" \
+    -e "s|quay.io/keycloak/keycloak:|$REGISTRY/keycloak/keycloak:|g" \
   operators/keycloak-operator/kubernetes.yml | kubectl -n keycloak apply -f -
 
 kubectl -n keycloak rollout status deployment/keycloak-operator

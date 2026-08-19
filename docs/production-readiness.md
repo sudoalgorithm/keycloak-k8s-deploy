@@ -40,7 +40,7 @@ the end) and the interim shortcuts **do not** carry over.
 - [ ] Keycloak operator image `26.5.2` and the vendored manifests in this
       repo at the same version as staging.
 - [ ] `production.yaml` placeholders filled: `<REGISTRY>`, `<CLIENT-DOMAIN>`,
-      `<CLIENT-PG-RW-ENDPOINT>`; `imagePullSecrets` uncommented.
+      `<CLIENT-PG-RW-ENDPOINT>`; `imagePullSecrets` name matches the secret created (`registry-creds`).
 - [ ] `diff staging.yaml production.yaml` reviewed — only the intended deltas
       (instances, resources, image/startOptimized, hostname, DB source, PDB,
       CNPG block).
@@ -48,7 +48,7 @@ the end) and the interim shortcuts **do not** carry over.
 ## C. Pre-flight on the production cluster
 
 - [ ] Namespace `keycloak` created.
-- [ ] Secrets present: `registry-credentials`, `keycloak-bootstrap-admin`,
+- [ ] Secrets present: `registry-creds`, `keycloak-bootstrap-admin`,
       `keycloak-db`, `keycloak-db-ca`.
 - [ ] Keycloak operator installed from `operators/keycloak-operator/` (image
       rewritten to the registry), SA patched with the pull secret, operator

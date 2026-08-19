@@ -102,7 +102,7 @@ Full command sequence, validation checklist included:
    rewritten to the internal registry.
 3. Create the secrets: `keycloak-bootstrap-admin` (both), `keycloak-db` and
    `keycloak-db-ca` (production only: credentials + CA of the external
-   PostgreSQL), `registry-credentials` if the registry needs auth.
+   PostgreSQL), `registry-creds` if the registry needs auth.
 4. Replace the placeholders — `<CLIENT-DOMAIN>` and `<REGISTRY>` in both
    files, `<CLIENT-PG-RW-ENDPOINT>` in `production.yaml`.
 5. `kubectl apply -f staging.yaml`, wait for `Ready`, run the validation
@@ -116,5 +116,5 @@ Full command sequence, validation checklist included:
 - API gateway (Kong) route configuration — managed outside this repo.
 - Realm content and migration (`KeycloakRealmImport` resources are produced by
   the migration pipeline, not stored here).
-- The custom authenticator image (`spec.image` is commented in both files
-  until it exists).
+- The custom authenticator image (`spec.image` moves to a tag carrying the JAR
+  when it exists).
