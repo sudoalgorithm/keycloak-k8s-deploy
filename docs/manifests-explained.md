@@ -97,6 +97,15 @@ Field by field:
 - **`bootstrap.initdb`** — on first start, create database `keycloak` owned by
   role `keycloak`. Keycloak manages its own schema inside it.
 
+- **`postgresUID` / `postgresGID: 26`** — the UID/GID PostgreSQL runs as
+  and must own the data directory. Matters the moment storage is
+  pre-provisioned: the backing directory's owner and these numbers must
+  agree, or PostgreSQL refuses to start.
+- **`storage.storageClass`** (commented) — CNPG **creates its own PVCs**
+  (`keycloak-pg-1`, `-2`) and never adopts a hand-made one. Without a dynamic
+  provisioner you pre-create two PVs carrying this class name and let CNPG's
+  claims bind to them (install-notes 0c).
+
 **What CNPG generates for us (nothing to configure):**
 
 | Generated object | Purpose |
@@ -136,25 +145,30 @@ spec:
     degraded-capacity state, not a split-brain risk.
 
 ```yaml
-  image: <REGISTRY>/keycloak/keycloak:26.5.2
-  startOptimized: false
+  image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
+  startOptimized: true
 ```
 
 **Air-gapped clusters change the image story.** Normally the operator deploys
 its own matching image from quay.io — impossible without internet, so the
-stock image is mirrored into the internal registry and pinned explicitly. Two
-consequences worth explaining:
+image is pinned explicitly to the internal registry. Three consequences worth
+explaining:
 
-- The mirrored image must **match the operator version exactly** — the
-  operator and server are released and tested as a pair.
-- When `image` is set, the operator assumes a *pre-optimized* image and starts
-  it with `--optimized`. The mirrored stock image is **not** augmented with
-  our build-time options (database vendor, metrics), so `startOptimized:
-  false` tells Keycloak to re-augment at startup — a few extra seconds per pod
-  start, functionally identical. When the custom email-or-phone authenticator
-  image is built locally (on the official base, options baked in) and pushed
-  to the registry, it replaces this reference and `startOptimized` flips to
-  `true`.
+- The image must **match the operator version exactly** — the operator and
+  server are released and tested as a pair.
+- It is a **pre-optimized** image (`build/keycloak-optimized/Dockerfile`):
+  the mirrored stock image plus a baked-in `kc.sh build` with our build-time
+  options (postgres driver, health, metrics). `startOptimized: true` tells
+  the operator to start it with `--optimized`, so a pod is serving in
+  seconds.
+- Why that matters, learned the hard way on staging: pointing the CR at the
+  plain stock image with `startOptimized: false` makes Keycloak re-run the
+  build on **every** pod start, before the health port opens. Under the pod
+  CPU limits that takes minutes, the startup probe gives up, the kubelet
+  kills the pod (exit 143) and it restart-loops indefinitely. Build once in
+  the image, never at start.
+- The same Dockerfile later carries the email-or-phone authenticator JAR —
+  new tag, same mechanism.
 
 ### 4.2 Database block
 

@@ -41,14 +41,15 @@ metadata:
   namespace: keycloak
 spec:
   instances: 3
-  # Air-gapped cluster: the image is the stock upstream image mirrored into
-  # the internal registry (must match the operator version exactly). Because
-  # it is the UN-augmented stock image, startOptimized stays false — Keycloak
-  # re-augments with our build-time options at startup. When the custom
-  # email-or-phone authenticator image lands (built and pushed locally), it
-  # replaces this reference and startOptimized can flip to true.
-  image: <REGISTRY>/keycloak/keycloak:26.5.2
-  startOptimized: false
+  # Air-gapped cluster: PRE-OPTIMIZED image built inside the gap from the
+  # mirrored stock image (build/keycloak-optimized/Dockerfile) and pushed to
+  # the internal registry. Must match the operator version exactly.
+  # startOptimized: true — the build step is baked in, so pods start in
+  # seconds. Do NOT point this at the plain stock image with startOptimized
+  # false: Keycloak then re-runs `kc.sh build` on every start, which under the
+  # CPU limits takes minutes, fails the startup probe and restart-loops.
+  image: <REGISTRY>/keycloak/keycloak:26.5.2-optimized
+  startOptimized: true
   # imagePullSecrets:               # uncomment if the registry requires auth
   #   - name: registry-credentials
   db:

@@ -133,6 +133,44 @@ assumptions:
    GitLab cleanup policies auto-delete tags on a schedule and would silently
    remove pinned images.
 
+## 0b. Build the pre-optimized Keycloak image — machine INSIDE the gap with registry access
+
+**Required, not optional.** The stock image re-runs `kc.sh build` on every
+pod start; under the pod CPU limits that takes minutes, the startup probe
+gives up and the pod restart-loops forever (symptom: log stops at *"Updating
+the configuration and installing your custom providers… Please wait"*, exit
+code 143, hundreds of restarts). Baking the build in once fixes it:
+
+```bash
+REGISTRY=<REGISTRY>
+docker build --build-arg REGISTRY=$REGISTRY \
+  -t $REGISTRY/keycloak/keycloak:26.5.2-optimized build/keycloak-optimized
+docker push $REGISTRY/keycloak/keycloak:26.5.2-optimized
+```
+
+Both YAML files reference this `-optimized` tag with `startOptimized: true`.
+The base is the mirrored stock image from step 0, so this needs no internet.
+
+## 0c. Storage for the staging PostgreSQL — read before applying
+
+CloudNativePG **creates its own PVCs**, named `<cluster>-<n>` (`keycloak-pg-1`,
+`keycloak-pg-2`); it never adopts a pre-created PVC. If the cluster has no
+default StorageClass with dynamic provisioning (typical on bare kubeadm), you
+pre-provision **two** PVs (one per instance; for `local` volumes on two
+different nodes) and let CNPG's PVCs bind to them:
+
+- each PV: ≥ 20Gi, `ReadWriteOnce`, `storageClassName: keycloak-pg`
+  (any name, used consistently), `Retain`;
+- the backing directory owned by the PostgreSQL UID/GID — default `26:26`
+  in the CNPG image (`chown -R 26:26 <dir> && chmod 700 <dir>`), or set
+  `postgresUID`/`postgresGID` in the CNPG spec to whatever the storage
+  enforces;
+- then uncomment `storageClass: keycloak-pg` in `staging.yaml`.
+
+A hand-made PVC (e.g. `keycloak-pg-pvc`) just sits unused — delete it, and
+if its PV is `Released`, free it: `kubectl patch pv <pv> -p
+'{"spec":{"claimRef":null}}'`.
+
 ## 1. Keycloak operator — BOTH clusters
 
 Applied from the vendored copies in `operators/keycloak-operator/` (downloaded

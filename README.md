@@ -15,17 +15,22 @@ or mirrored into the internal container registry beforehand.
 │   ├── install-notes.md       # step-by-step: image mirroring, operator installs, secrets, deploy, validation
 │   ├── keycloak-operator/     # vendored official manifests, tag 26.5.2 (unmodified)
 │   └── cnpg/                  # vendored official CNPG manifest 1.25.1 (unmodified)
+├── build/
+│   └── keycloak-optimized/    # Dockerfile: pre-optimized Keycloak image, built INSIDE the gap
 └── docs/
     └── manifests-explained.md # field-by-field walkthrough of the two YAML files
 ```
 
-**Why no Dockerfiles:** nothing here is built — a `docker build` would itself
-pull base images from the internet, and hand-built images lose the official
-release's testing and signing. Air-gapped delivery means the four **official**
-images are pulled on a connected machine, saved to tar, carried across the gap
+**Images: mirrored, plus one in-gap build.** The four **official** images
+(Keycloak server + operator, CNPG operator + PostgreSQL) are never rebuilt —
+they are pulled on a connected machine, saved to tar, carried across the gap
 through the approved channel, and pushed to the internal registry
-(install-notes step 0). The future custom Keycloak image (authenticator JAR)
-lives in its own repo when that work starts.
+(install-notes step 0). The one image we build is the **pre-optimized
+Keycloak** (`build/keycloak-optimized/`): its base is the mirrored stock
+image, so it builds with no internet, and it bakes in `kc.sh build` so pods
+start in seconds instead of re-building on every start (which restart-loops
+under the pod CPU limits — install-notes 0b). The same Dockerfile will later
+carry the email-or-phone authenticator JAR.
 
 ## What gets deployed
 
@@ -73,8 +78,7 @@ diff staging.yaml production.yaml
   machine, transferred, and pushed to the internal registry; `<REGISTRY>` in
   the YAML files points at it. Operator manifests are applied from the
   vendored copies in this repo, never from URLs. The Keycloak CR pins the
-  mirrored stock image with `startOptimized: false` (it re-augments at start;
-  flips to `true` once the locally built custom image replaces it).
+  in-gap-built `26.5.2-optimized` image with `startOptimized: true`.
 - **Versions** are pinned (Keycloak operator `26.5.2`, CloudNativePG `1.25.1`).
   Bump patch versions deliberately: re-vendor manifests + re-mirror images on
   a connected machine, then staging first, both files together.
